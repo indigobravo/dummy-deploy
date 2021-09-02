@@ -1,0 +1,17 @@
+{
+  "AWSEBDockerrunVersion": "1",
+  "Image": {
+    "Name": "hypothesis/via"
+  },
+  "Ports": [
+    {
+      "ContainerPort": "9083"
+    }
+  ],
+  "Volumes": [
+    {
+      "HostDirectory": "/via-data",
+      "ContainerDirectory": "/via-data"
+    }
+  ]
+}

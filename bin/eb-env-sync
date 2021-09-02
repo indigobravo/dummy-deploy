@@ -1,0 +1,95 @@
+#!/bin/sh
+
+usage () {
+    echo "Usage: $(basename "$0") <APP> <ENV> <REGION>"
+    echo
+    echo "Synchronize an Elastic Beanstalk environment with the settings in the"
+    echo "local environment configuration file."
+    echo
+    echo "  APP            the name of the application, e.g. 'bouncer'"
+    echo "  ENV            the environment: typically 'qa' or 'prod'"
+    echo "  REGION         the target AWS region"
+    echo
+    echo "us-west-1 environment configuration will be assumed to live in an "
+    echo "environment manifest at <APP>/env-<ENV>.yml relative to the working "
+    echo "directory."
+    echo
+    echo "ca-central-1 environment configuration will be assumed to live in an "
+    echo "environment manifest at <APP>/env-<ENV>-ca.yml relative to the working "
+    echo "directory."
+}
+
+abort () {
+    echo "Error:" "$@" >&2
+    echo "Aborting!" >&2
+    exit 1
+}
+
+status () {
+    echo "--->" "$@" >&2
+}
+
+if [ "$#" -ne 3 ]; then
+    usage >&2
+    exit 1
+fi
+
+set -eu
+
+PATH="$(dirname "$0"):${PATH}"
+
+APP=$1
+ENV=$2
+REGION=$3
+
+if [ $REGION = 'us-west-1' ]; then
+    MANIFEST="${APP}/env-${ENV}.yml"
+fi
+
+if [ $REGION = 'ca-central-1' ]; then
+    MANIFEST="${APP}/env-${ENV}-${REGION:0:2}.yml"
+fi
+
+if [ ! -f "$MANIFEST" ]; then
+    abort "expected to find environment manifest file at '${MANIFEST}'"
+fi
+
+if ! eb-env-exists "$APP" "$ENV" "$REGION"; then
+    abort "$ENV environment doesn't exist for $APP"
+fi
+
+# To update the environment, we must manipulate the settings in the environment
+# manifest into a format which can be passed to the `--option-settings`
+# parameter to `aws elasticbeanstalk update-environment`.
+
+status "preparing option settings file"
+
+OPTION_SETTINGS_FILE=$(mktemp)
+eb-manifest-settings <"$MANIFEST" >"$OPTION_SETTINGS_FILE"
+
+# And clean up when we're done...
+trap 'rm "$OPTION_SETTINGS_FILE"' EXIT
+
+
+# We also need to parse out the ElasticBeanstalk platform ARN and
+# and pass it to the `--platform-arn` parameter.
+
+status "parsing platform ARN"
+
+EB_PLATFORM_ARN=$(eb-manifest-platform <"$MANIFEST")
+
+status "updating application resource lifecycle settings"
+
+aws elasticbeanstalk update-application-resource-lifecycle \
+    --application-name "$APP" \
+    --resource-lifecycle-config file://resource-lifecycle.json \
+    --region $REGION
+
+status "updating environment"
+
+aws elasticbeanstalk update-environment \
+    --application-name "$APP" \
+    --environment-name "${APP}-${ENV}" \
+    --platform-arn "$EB_PLATFORM_ARN" \
+    --option-settings file://"$OPTION_SETTINGS_FILE" \
+    --region $REGION

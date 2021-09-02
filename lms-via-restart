@@ -1,0 +1,22 @@
+#!groovy
+
+pipeline {
+    agent { dockerfile true }
+
+    environment {
+        AWS_DEFAULT_REGION = "us-west-1"
+    }
+
+    stages {
+        stage('main') {
+            steps {
+                lock(resource: "lms-via-prod-deploy") {
+                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding',
+                                      credentialsId: 'aws-elasticbeanstalk-jenkins']]) {
+                        sh 'bin/restart-via lms-via redeploy prod us-west-1' 
+                    }
+                }
+            }
+        }
+    }
+}

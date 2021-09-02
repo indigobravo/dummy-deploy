@@ -1,0 +1,71 @@
+#!/bin/sh
+
+# The name of the Elastic Beanstalk application to manage
+: ${APP:=}
+# The type of the deployment.
+# * `deploy` releases and deploys a specific app version to the environment.
+# * `redeploy` triggers a redeployment of the currently-deployed version.
+# * `sync-env` synchronizes the Elastic Beanstalk environment.
+: ${TYPE:=}
+# If deploying an application version, the docker tag of the version to create
+# and release.
+: ${APP_DOCKER_VERSION:=}
+# The environment on which to operate (typically "qa" or "prod"). Note that the
+# name of the environment in Elastic Beanstalk will be prefixed with the name of
+# the application.
+: ${ENV:=}
+# The target AWS region
+: ${REGION:=}
+
+PATH="$(dirname "$0"):${PATH}"
+
+set -eu
+
+export AWS_DEFAULT_REGION="$REGION"
+
+abort () {
+    echo "Error:" "$@" >&2
+    echo "Aborting!" >&2
+    exit 1
+}
+
+if [ -z "$APP" ]; then
+    abort "cannot proceed unless \$APP is specified"
+fi
+
+if [ -z "$ENV" ]; then
+    abort "cannot proceed unless \$ENV is specified"
+fi
+
+if [ -z "$REGION" ]; then
+    abort "cannot proceed unless \$REGION is specified"
+fi
+
+if [ ! $REGION = 'us-west-1' ]; then
+    # Remove '-' + 2 letter region code from APP when not deploying to us-west-1.
+    APP=$(echo $APP | awk '{print substr($0, 1, length($0)-length("-rc"))}')
+fi
+
+if [ "$TYPE" = "deploy" ]; then
+  if [ -z "$APP_DOCKER_VERSION" ]; then
+    abort "cannot proceed with deploy unless \$APP_DOCKER_VERSION is specified"
+  fi
+
+  version_label=$(eb-release "$APP" "$APP_DOCKER_VERSION" "$ENV" "$REGION")
+  eb-deploy "$APP" "$ENV" "$version_label" "$REGION"
+
+elif [ "$TYPE" = "redeploy" ]; then
+  if [ -n "$APP_DOCKER_VERSION" ]; then
+    abort "do not specify \$APP_DOCKER_VERSION for a redeploy"
+  fi
+
+  version_label=$(eb-env-version "$APP" "$ENV" "$REGION")
+  eb-deploy "$APP" "$ENV" "$version_label" "$REGION"
+
+elif [ "$TYPE" = "sync-env" ]; then
+  eb-env-sync "$APP" "$ENV" "$REGION"
+else
+  abort "Don't know how to handle deployment type \"$TYPE\""
+fi
+
+eb-env-wait "$APP" "$ENV" "$REGION"

@@ -1,0 +1,10 @@
+{
+  "ServiceRole": "arn:aws:iam::964867326460:role/aws-elasticbeanstalk-service-role",
+  "VersionLifecycleConfig": {
+    "MaxCountRule": {
+      "Enabled": true,
+      "MaxCount": 10,
+      "DeleteSourceFromS3": true
+    }
+  }
+}

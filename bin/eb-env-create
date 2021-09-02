@@ -1,0 +1,84 @@
+#!/bin/sh
+
+usage () {
+    echo "Usage: $(basename "$0") <APP> <ENV> <VERSION> <REGION>"
+    echo
+    echo "Create an Elastic Beanstalk environment. Provide an application name,"
+    echo "environment name, application version and region."
+    echo
+    echo "  APP            the name of the application, e.g. 'bouncer'"
+    echo "  ENV            the environment: typically 'qa' or 'prod'"
+    echo "  VERSION        the version number of the previously-uploaded"
+    echo "                 application source bundle to deploy into the new"
+    echo "                 environment"
+    echo "  REGION         the target AWS region"
+    echo
+    echo "us-west-1 environment configuration will be assumed to live in an "
+    echo "environment manifest at <APP>/env-<ENV>.yml relative to the working "
+    echo "directory."
+    echo
+    echo "ca-central-1 environment configuration will be assumed to live in an "
+    echo "environment manifest at <APP>/env-<ENV>-ca.yml relative to the working "
+    echo "directory."
+    echo
+    echo "N.B. The application version must have been uploaded to EB before"
+    echo "running this command!"
+}
+
+abort () {
+    echo "Error:" "$@" >&2
+    echo "Aborting!" >&2
+    exit 1
+}
+
+status () {
+    echo "--->" "$@" >&2
+}
+
+if [ "$#" -ne 4 ]; then
+    usage >&2
+    exit 1
+fi
+
+set -eu
+
+PATH="$(dirname "$0"):${PATH}"
+
+APP=$1
+ENV=$2
+VERSION=$3
+REGION=$4
+
+if [ $REGION = 'us-west-1' ]; then 
+  MANIFEST="${APP}/env-${ENV}.yml"
+fi
+
+if [ $REGION = 'ca-central-1' ]; then
+  MANIFEST="${APP}/env-${ENV}-${REGION:0:2}.yml"
+fi
+
+if [ ! -f "$MANIFEST" ]; then
+    abort "expected to find environment manifest file at '${MANIFEST}'"
+fi
+
+if eb-env-exists "$APP" "$ENV" "$REGION"; then
+    abort "$ENV environment already exists for $APP"
+fi
+
+# To create the environment, we first upload the environment manifest to a
+# predefined location in the Elastic Beanstalk storage bucket, and then trigger
+# an environment creation based on this template.
+
+status "fetching storage location"
+EB_BUCKET=$(aws elasticbeanstalk create-storage-location --query S3Bucket --output text --region $REGION)
+
+status "updating environment template"
+aws s3 cp "$MANIFEST" "s3://${EB_BUCKET}/resources/templates/${APP}/${APP}-${ENV}"
+
+status "creating environment"
+aws elasticbeanstalk create-environment \
+    --application-name "$APP" \
+    --environment-name "${APP}-${ENV}" \
+    --template-name "${APP}-${ENV}" \
+    --version-label "$VERSION" \
+    --region "$REGION"
